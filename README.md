@@ -2,7 +2,7 @@
 
 ## LUMI / MI250x (1 GCD)
 
-### Installation
+### Installing MAGMA
 
 ```bash
 export EBU_USER_PREFIX=$PWD/EasyBuild
@@ -57,7 +57,7 @@ sbatch --partition=dev-g --nodes=1 --ntasks-per-node=1 --cpus-per-task=1 --gpus-
 
 ## Mahti / A100
 
-### Installation
+### Installing MAGMA
 
 ```bash
 ml cuda/11.5.0
