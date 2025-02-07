@@ -7,7 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <vector>
-
+#include <cstring>
 
 #ifdef MAGMA
   #include "magma_v2.h"
@@ -371,11 +371,19 @@ void run(int n, int repeat) {
 }
 
 
+enum class NumberType
+{
+    eFloat, // 32bit
+    eDouble, // 64bit
+    eComplexFloat, // complex<float>
+    eComplexDouble // complex<double> 
+};
+
 int main(int argc, char *argv[]) {
     // Default values
     std::list<int> matrix_sizes = {10};
     int repeat = 10;
-    bool do_double = true;
+    NumberType number_type = NumberType::eDouble;
 
     // Parse args
     if (argc > 1) {
@@ -390,17 +398,40 @@ int main(int argc, char *argv[]) {
         repeat = std::stoi(argv[2]);
     }
     if (argc > 3) {
-        if (std::string(argv[3]) != "double") {
-            do_double = false;
+        const std::string in_number_type_str = std::string(argv[3]);
+
+        if (in_number_type_str == "float") {
+            number_type = NumberType::eFloat;
         }
+        else if (in_number_type_str == "double") {
+            number_type = NumberType::eDouble;
+        }
+        else if (in_number_type_str == "complex_float") {
+            number_type = NumberType::eComplexFloat;
+        }
+        else if (in_number_type_str == "complex_double") {
+            number_type = NumberType::eComplexDouble;
+        }
+        else {
+            std::printf("Invalid number type: [%s]. Choose from: float, double, complex_float, complex_double",
+                in_number_type_str.c_str());
+        }
+
     }
 
     // Calculate
     for (auto n: matrix_sizes) {
-        if (do_double)
-            run<double>(n, repeat);
-        else
-            run<float>(n, repeat);
+        
+        switch (number_type) {
+            case NumberType::eFloat:
+                run<float>(n, repeat);
+                break;
+            case NumberType::eDouble:
+                run<double>(n, repeat);
+                break;
+            default:
+                break;
+        }
     }
 
     cudaDeviceReset();
