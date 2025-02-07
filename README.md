@@ -82,3 +82,17 @@ sbatch -p gputest --nodes=1 --ntasks-per-node=1 --gres=gpu:a100:1 -t 0:15:00 -o 
 nvcc -std=c++14 -arch=sm_80 -O3 -DMAGMA -DCUDA -lmagma -I$PWD/magma/include -L$PWD/magma/lib -Xcompiler \"-Wl,-rpath,$PWD/magma/lib\" eigh.cpp -o magma2.8.0_cuda11.5.0.x
 sbatch -p gputest --nodes=1 --ntasks-per-node=1 --gres=gpu:a100:1 -t 0:15:00 -o magma2.8.0_cuda11.5.0.out --wrap='./magma2.8.0_cuda11.5.0.x 3,100,200,400,800,1600,3200,6400,12800'
 ```
+
+### Testing CUDA 12.6.1 and MAGMA 2.9.0
+
+Container source [here](https://github.com/trossi/containers/tree/main/examples/cuda_magma).
+
+```bash
+export SINGULARITY_BIND="/scratch,/projappl,/appl"
+
+singularity exec -B /local_scratch cuda_magma.sif nvcc -std=c++14 -arch=sm_80 -O3 -DCUDA -lcusolver eigh.cpp -o cuda12.6.1.x
+sbatch -p gputest --nodes=1 --ntasks-per-node=1 --gres=gpu:a100:1 -t 0:15:00 -o cuda12.6.1.out --wrap='singularity exec --nv cuda_magma.sif ./cuda12.6.1.x 3,100,200,400,800,1600,3200,6400,12800'
+
+singularity exec -B /local_scratch cuda_magma.sif nvcc -std=c++14 -arch=sm_80 -O3 -DMAGMA -DCUDA -lmagma eigh.cpp -o magma2.9.0_cuda12.6.1.x
+sbatch -p gputest --nodes=1 --ntasks-per-node=1 --gres=gpu:a100:1 -t 0:15:00 -o magma2.9.0_cuda12.6.1.out --wrap='singularity exec --nv cuda_magma.sif ./magma2.9.0_cuda12.6.1.x 3,100,200,400,800,1600,3200,6400,12800'
+```
