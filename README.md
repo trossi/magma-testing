@@ -36,7 +36,21 @@ ml partition/G
 ml rocm/6.2.2
 
 hipcc -std=c++14 --offload-arch=gfx90a -O3 -DHIP -lrocblas -lrocsolver eigh.cpp -o rocm6.2.2.x
-sbatch --partition=dev-g --nodes=1 --ntasks-per-node=1 --cpus-per-task=1 --gpus-per-node=1 --time=01:00:00 -o 'rocm6.0.3.out' --wrap='./rocm6.0.3.x 3,100,200,400,800,1600,3200'
+sbatch --partition=dev-g --nodes=1 --ntasks-per-node=1 --cpus-per-task=1 --gpus-per-node=1 --time=01:00:00 -o 'rocm6.2.2.out' --wrap='./rocm6.2.2.x 3,100,200,400,800,1600,3200'
+```
+
+### Testing ROCm 6.3.2 and MAGMA 2.9.0
+
+Container source [here](https://github.com/trossi/containers/tree/main/examples/rocm_magma).
+
+```bash
+export SINGULARITY_BIND="/pfs,/scratch,/projappl,/project,/flash,/appl"
+
+singularity exec rocm_magma.sif hipcc -std=c++14 --offload-arch=gfx90a -O3 -DHIP -lrocblas -lrocsolver eigh.cpp -o rocm6.3.2.x
+sbatch --partition=dev-g --nodes=1 --ntasks-per-node=1 --cpus-per-task=1 --gpus-per-node=1 --time=01:00:00 -o 'rocm6.3.2.out' --wrap='singularity exec rocm_magma.sif ./rocm6.3.2.x 3,100,200,400,800,1600,3200,6400'
+
+singularity exec rocm_magma.sif hipcc -std=c++14 --offload-arch=gfx90a -O3 -DMAGMA -DHIP -lmagma eigh.cpp -o magma2.9.0_rocm6.3.2.x
+sbatch --partition=dev-g --nodes=1 --ntasks-per-node=1 --cpus-per-task=1 --gpus-per-node=1 --time=01:00:00 -o 'magma2.9.0_rocm6.3.2.out' --wrap='singularity exec rocm_magma.sif ./magma2.9.0_rocm6.3.2.x 3,100,200,400,800,1600,3200,6400,12800'
 ```
 
 ## Mahti / A100
