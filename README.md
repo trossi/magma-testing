@@ -17,9 +17,11 @@ exit
 ### Testing
 
 ```bash
+export EBU_USER_PREFIX=$PWD/EasyBuild
 ml LUMI/24.03
 ml partition/G
 ml rocm/6.0.3
+ml magma/2.8.0-cpeGNU-24.03-rocm
 
 hipcc -std=c++14 --offload-arch=gfx90a -O3 -DHIP -lrocblas -lrocsolver eigh.cpp -o rocm6.0.3.x
 sbatch --partition=dev-g --nodes=1 --ntasks-per-node=1 --cpus-per-task=1 --gpus-per-node=1 --time=01:00:00 -o 'rocm6.0.3.out' --wrap='./rocm6.0.3.x 3,100,200,400,800,1600'
