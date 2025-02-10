@@ -14,6 +14,7 @@
 
 #ifdef MAGMA
   #include "magma_v2.h"
+  #include "magma_operators.h"
 #endif
 
 // Check if templated parameter is std::complex
@@ -71,6 +72,20 @@ struct is_complex_t<std::complex<T>> : public std::true_type {};
   template<>
   magma_int_t (*magma_syevd_gpu<double>)(magma_vec_t, magma_uplo_t, magma_int_t, double*, magma_int_t, double*, double*, magma_int_t, double*, magma_int_t, magma_int_t*, magma_int_t, magma_int_t*) = &magma_dsyevd_gpu;
 
+  // Templated wrapper for MAGMA complex types
+  template<typename T>
+  using magma_complex_num = typename std::conditional<std::is_same<T, float>::value, magmaFloatComplex, magmaDoubleComplex>::type;
+
+  // MAGMA complex solvers (HEEVD)
+  template<typename T>
+  magma_int_t (*magma_heevd_gpu)(magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, magma_complex_num<T> *dA, magma_int_t ldda, T *w, magma_complex_num<T> *wA, magma_int_t ldwa, magma_complex_num<T> *work, magma_int_t lwork, T *rwork, magma_int_t lrwork, magma_int_t *iwork, magma_int_t liwork, magma_int_t *info);
+
+  template<>
+  magma_int_t (*magma_heevd_gpu<float>)(magma_vec_t, magma_uplo_t, magma_int_t, magma_complex_num<float>*, magma_int_t, float*, magma_complex_num<float>*, magma_int_t, magma_complex_num<float>*, magma_int_t, float*, magma_int_t, magma_int_t*, magma_int_t, magma_int_t*) = &magma_cheevd_gpu;
+
+  template<>
+  magma_int_t (*magma_heevd_gpu<double>)(magma_vec_t, magma_uplo_t, magma_int_t, magma_complex_num<double>*, magma_int_t, double*, magma_complex_num<double>*, magma_int_t, magma_complex_num<double>*, magma_int_t, double*, magma_int_t, magma_int_t*, magma_int_t, magma_int_t*) = &magma_zheevd_gpu;
+
 #elif defined(CUDA)
   #define uplo_t           cublasFillMode_t
   #define UPLO_LOWER       CUBLAS_FILL_MODE_LOWER
@@ -118,6 +133,8 @@ struct is_complex_t<std::complex<T>> : public std::true_type {};
   template<>
   rocblas_status (*rocsolver_heevd<double>)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, rocblas_complex_num<double>*, const rocblas_int, double*, double*, rocblas_int*) = &rocsolver_zheevd;
 
+#endif // ~HIP
+
 // Helper type for sharing template code between complex and real calculations
 template<typename T>
 struct d_internal_type
@@ -129,18 +146,71 @@ struct d_internal_type
 template<typename U>
 struct d_internal_type<std::complex<U>>
 {
-    using full_t = rocblas_complex_num<U>;
     using real_t = U;
+
+#if defined(MAGMA)
+    using full_t = magma_complex_num<U>;
+#elif defined(CUDA)
+    //TODO
+#elif defined(HIP)
+    using full_t = rocblas_complex_num<U>;
+#endif
 };
 
-
+// Define combined eigsolver: calls syevd for real matrices and heevd for complex matrices
 // define rocsolver_eig() to call rocsolver_syevd() for real template arg, and rocsolver_heevd for complex arg
+
+#if defined(MAGMA)
+
+/*
+template<typename T>
+magma_int_t (*magma_eigsolver_gpu)(magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, typename d_internal_type<T>::full_t *dA, magma_int_t ldda, typename d_internal_type<T>::real_t *w, typename d_internal_type<T>::full_t *wA, magma_int_t ldwa, typename d_internal_type<T>::full_t *work, magma_int_t lwork, typename d_internal_type<T>::real_t *rwork, magma_int_t lrwork, magma_int_t *iwork, magma_int_t liwork, magma_int_t *info) = magma_syevd_gpu<typename d_internal_type<T>::real_t>;
+
+template<typename U>
+magma_int_t (*magma_eigsolver_gpu<std::complex<U>>)(magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, typename d_internal_type<std::complex<U>>::full_t *dA, magma_int_t ldda, typename d_internal_type<std::complex<U>>::real_t *w, typename d_internal_type<std::complex<U>>::full_t *wA, magma_int_t ldwa, typename d_internal_type<std::complex<U>>::full_t *work, magma_int_t lwork, typename d_internal_type<std::complex<U>>::real_t *rwork, magma_int_t lrwork, magma_int_t *iwork, magma_int_t liwork, magma_int_t *info) = magma_heevd_gpu<U>;
+*/
+
+template<typename T>
+magma_int_t magma_eigsolver_gpu(magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n,
+    typename d_internal_type<T>::full_t *dA, magma_int_t ldda, typename d_internal_type<T>::real_t *w,
+    typename d_internal_type<T>::full_t *wA, magma_int_t ldwa, typename d_internal_type<T>::full_t *work, 
+    magma_int_t lwork, typename d_internal_type<T>::real_t *rwork, magma_int_t lrwork, magma_int_t *iwork,
+    magma_int_t liwork, magma_int_t *info)
+{
+    return magma_heevd_gpu<typename d_internal_type<T>::real_t>(jobz, uplo, n, dA, ldda, w, wA, ldwa, work, lwork, rwork, lrwork, iwork, liwork, info);
+}
+
+template<>
+magma_int_t magma_eigsolver_gpu<float>(magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n,
+    float *dA, magma_int_t ldda, float *w,
+    float *wA, magma_int_t ldwa, float *work, 
+    magma_int_t lwork, float *rwork, magma_int_t lrwork, magma_int_t *iwork,
+    magma_int_t liwork, magma_int_t *info)
+{
+    // does not use rwork, lrwork
+    return magma_syevd_gpu<float>(jobz, uplo, n, dA, ldda, w, wA, ldwa, work, lwork, iwork, liwork, info);
+}
+
+template<>
+magma_int_t magma_eigsolver_gpu<double>(magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n,
+    double *dA, magma_int_t ldda, double *w,
+    double *wA, magma_int_t ldwa, double *work, 
+    magma_int_t lwork, double *rwork, magma_int_t lrwork, magma_int_t *iwork,
+    magma_int_t liwork, magma_int_t *info)
+{
+    // does not use rwork, lrwork
+    return magma_syevd_gpu<double>(jobz, uplo, n, dA, ldda, w, wA, ldwa, work, lwork, iwork, liwork, info);
+}
+
+#elif defined(CUDA)
+// TODO
+
+#elif defined(HIP)
 template<typename T>
 rocblas_status (*rocsolver_eig)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, typename d_internal_type<T>::full_t*, const rocblas_int, typename d_internal_type<T>::real_t*, typename d_internal_type<T>::real_t*, rocblas_int*) = rocsolver_syevd<typename d_internal_type<T>::real_t>;
 
 template<typename U>
 rocblas_status (*rocsolver_eig<std::complex<U>>)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, typename d_internal_type<std::complex<U>>::full_t*, const rocblas_int, typename d_internal_type<std::complex<U>>::real_t*, typename d_internal_type<std::complex<U>>::real_t*, rocblas_int*) = rocsolver_heevd<U>;
-
 #endif
 
 
@@ -270,6 +340,10 @@ struct Calculator {
     magma_int_t *h_iwork;
     magma_int_t liwork;
 
+    // rwork and lrwork needed for complex MAGMA solver, not used otherwise
+    d_real_type *rwork;
+    magma_int_t lrwork;
+
 #elif defined(CUDA)
     cusolverDnHandle_t handle;
     cusolverDnParams_t params;
@@ -285,23 +359,35 @@ struct Calculator {
 
 #endif
 
+#if defined(MAGMA)
+    // Find optimal sizes. Default implementation is for complex matrices (heevd), specialization for real matrices is below
+    void magma_query_work_sizes(magma_int_t &lwork_opt, magma_int_t &lrwork_opt, magma_int_t &liwork_opt)
+    {
+        d_full_type work_temp;
+        d_real_type rwork_temp;
+        magma_int_t iwork_temp;
+        
+        magma_eigsolver_gpu<T>(vec, uplo, n, nullptr, lda, nullptr, nullptr, lda, &work_temp, -1, &rwork_temp, -1, &iwork_temp, -1, &h_info);
+
+        lwork_opt = static_cast<magma_int_t>(real(work_temp));
+        lrwork_opt = static_cast<magma_int_t>(rwork_temp);
+        liwork_opt = iwork_temp;
+    }
+
+#endif //~ if defined(MAGMA)
+
     Calculator(int n, uplo_t uplo, vec_mode_t vec) : n{n}, lda{n}, uplo{uplo}, vec{vec} {
 
 #if defined(MAGMA)
-        // Initialize
         magma_init();
         magma_queue_create(0, &queue);
-#if defined(CUDA)
+    #if defined(CUDA)
         stream = magma_queue_get_cuda_stream(queue);
-#elif defined(HIP)
+    #elif defined(HIP)
         stream = magma_queue_get_hip_stream(queue);
-#endif
-        // Query work sizes
-        T lwork_opt;
-        magma_int_t liwork_opt;
-        magma_syevd_gpu<T>(vec, uplo, n, nullptr, lda, nullptr, nullptr, lda, &lwork_opt, -1, &liwork_opt, -1, &h_info);
-        lwork = static_cast<magma_int_t>(lwork_opt);
-        liwork = liwork_opt;
+    #endif
+
+        magma_query_work_sizes(lwork, lrwork, liwork);
 
         // Allocate work arrays
         h_wA = reinterpret_cast<T*>(malloc(sizeof(T) * lda*n));
@@ -380,7 +466,7 @@ struct Calculator {
         cudaMemcpyAsync(d_A, d_A_input, sizeof(d_full_type) * lda*n, cudaMemcpyDeviceToDevice, stream);
 
 #if defined(MAGMA)
-        magma_syevd_gpu<T>(vec, uplo, n, d_A, lda, h_W, h_wA, lda, h_work, lwork, h_iwork, liwork, &h_info);
+        magma_eigsolver_gpu<T>(vec, uplo, n, d_A, lda, h_W, h_wA, lda, h_work, lwork, rwork, lrwork, h_iwork, liwork, &h_info);
 
         // Copy eigenvectors to GPU
         cudaMemcpyAsync(d_W, h_W, sizeof(T) * n, cudaMemcpyHostToDevice, stream);
@@ -421,6 +507,62 @@ struct Calculator {
         cudaFree(d_A);
     }
 };
+
+#if defined(MAGMA)
+template<>
+void Calculator<float>::magma_query_work_sizes(magma_int_t &lwork_opt, magma_int_t &lrwork_opt, magma_int_t &liwork_opt)
+{
+    float work_temp;
+    float rwork_temp;
+    magma_int_t iwork_temp;
+    magma_eigsolver_gpu<float>(vec, uplo, n, nullptr, lda, nullptr, nullptr, lda, &work_temp, -1, &rwork_temp, -1, &iwork_temp, -1, &h_info);
+    lwork_opt = static_cast<magma_int_t>(work_temp);
+    liwork_opt = iwork_temp;
+}
+
+template<>
+void Calculator<double>::magma_query_work_sizes(magma_int_t &lwork_opt, magma_int_t &lrwork_opt, magma_int_t &liwork_opt)
+{
+    double work_temp;
+    double rwork_temp;
+    magma_int_t iwork_temp;
+    magma_eigsolver_gpu<double>(vec, uplo, n, nullptr, lda, nullptr, nullptr, lda, &work_temp, -1, &rwork_temp, -1, &iwork_temp, -1, &h_info);
+    lwork_opt = static_cast<magma_int_t>(work_temp);
+    liwork_opt = iwork_temp;
+}
+
+#endif
+
+/*
+template<typename U>
+void Calculator<std::complex<U>>::init_magma() {
+        {
+        magma_init();
+        magma_queue_create(0, &queue);
+    #if defined(CUDA)
+        stream = magma_queue_get_cuda_stream(queue);
+    #elif defined(HIP)
+        stream = magma_queue_get_hip_stream(queue);
+    #endif
+        // Query optimal work sizes
+        d_full_type lwork_opt;
+        magma_int_t liwork_opt;
+
+        d_real_type rwork_opt;
+
+        magma_heevd_gpu<d_real_type>(vec, uplo, n, nullptr, lda, nullptr, nullptr, lda, &lwork_opt, -1, &rwork_opt, -1, &liwork_opt, -1, &h_info);
+
+        lwork = static_cast<magma_int_t>(lwork_opt);
+        liwork = liwork_opt;
+
+        // Allocate work arrays
+        h_wA = reinterpret_cast<T*>(malloc(sizeof(T) * lda*n));
+        h_work = reinterpret_cast<T*>(malloc(sizeof(T) * lwork));
+        h_iwork = reinterpret_cast<magma_int_t*>(malloc(sizeof(magma_int_t) * liwork));
+    }
+}
+*/
+
 
 template <typename T>
 void run(int n, int repeat) {
