@@ -107,14 +107,14 @@ struct is_complex_t<std::complex<T>> : public std::true_type {};
 
   // Eigensolvers for complex diagonalization (Hermitian matrices, eigenvalues are real)
 
-  template <typename Real_t>
+  template <typename real_t>
   using rocblas_complex_t = typename std::conditional<
-    std::is_same<Real_t, float>::value,
+    std::is_same<real_t, float>::value,
     rocblas_float_complex,
     rocblas_double_complex>::type;
 
-  template <typename Real_t>
-  rocblas_status (*rocsolver_heevd)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, rocblas_complex_t<Real_t>*, const rocblas_int, Real_t*, Real_t*, rocblas_int*);
+  template <typename real_t>
+  rocblas_status (*rocsolver_heevd)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, rocblas_complex_t<real_t>*, const rocblas_int, real_t*, real_t*, rocblas_int*);
 
   // rocblas_float_complex
   template<>
@@ -433,7 +433,7 @@ struct Calculator {
 template <typename T>
 void run(int n, int repeat) {
 
-    using Real_t = typename d_internal_type<T>::real_t;
+    using real_t = typename d_internal_type<T>::real_t;
 
     using d_full_type = typename d_internal_type<T>::full_t;
     using d_real_type = typename d_internal_type<T>::real_t;
@@ -447,9 +447,9 @@ void run(int n, int repeat) {
     const int lda = n;
 
     // Host eigenvectors, real
-    std::vector<Real_t> h_V(lda * n, 0);
+    std::vector<real_t> h_V(lda * n, 0);
     // Host eigenvalues, real
-    std::vector<Real_t> h_W(n, 0);
+    std::vector<real_t> h_W(n, 0);
 
     // Build a test matrix. Will be symmetric for real T and Hermitian for complex T
     std::vector<T> h_A = build_test_matrix<T>(n, n);
@@ -463,7 +463,7 @@ void run(int n, int repeat) {
     d_real_type *d_W = nullptr;
 
     cudaMalloc(reinterpret_cast<void **>(&d_A), sizeof(T) * h_A.size());
-    cudaMalloc(reinterpret_cast<void **>(&d_W), sizeof(Real_t) * h_W.size());
+    cudaMalloc(reinterpret_cast<void **>(&d_W), sizeof(real_t) * h_W.size());
     cudaMemcpy(d_A, h_A.data(), sizeof(T) * h_A.size(), cudaMemcpyHostToDevice);
     cudaDeviceSynchronize();
 
