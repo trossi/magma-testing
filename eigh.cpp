@@ -108,21 +108,15 @@ struct is_complex_t<std::complex<T>> : public std::true_type {};
   // Eigensolvers for complex diagonalization (Hermitian matrices, eigenvalues are real)
 
   template <typename real_t>
-  using rocblas_complex_t = typename std::conditional<
-    std::is_same<real_t, float>::value,
-    rocblas_float_complex,
-    rocblas_double_complex>::type;
-
-  template <typename real_t>
-  rocblas_status (*rocsolver_heevd)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, rocblas_complex_t<real_t>*, const rocblas_int, real_t*, real_t*, rocblas_int*);
+  rocblas_status (*rocsolver_heevd)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, rocblas_complex_num<real_t>*, const rocblas_int, real_t*, real_t*, rocblas_int*);
 
   // rocblas_float_complex
   template<>
-  rocblas_status (*rocsolver_heevd<float>)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, rocblas_complex_t<float>*, const rocblas_int, float*, float*, rocblas_int*) = &rocsolver_cheevd;
+  rocblas_status (*rocsolver_heevd<float>)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, rocblas_complex_num<float>*, const rocblas_int, float*, float*, rocblas_int*) = &rocsolver_cheevd;
 
   // rocblas_double_complex
   template<>
-  rocblas_status (*rocsolver_heevd<double>)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, rocblas_complex_t<double>*, const rocblas_int, double*, double*, rocblas_int*) = &rocsolver_zheevd;
+  rocblas_status (*rocsolver_heevd<double>)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, rocblas_complex_num<double>*, const rocblas_int, double*, double*, rocblas_int*) = &rocsolver_zheevd;
 
 // Helper type for sharing template code between complex and real calculations
 template<typename T>
@@ -135,7 +129,7 @@ struct d_internal_type
 template<typename U>
 struct d_internal_type<std::complex<U>>
 {
-    using full_t = rocblas_complex_t<U>;
+    using full_t = rocblas_complex_num<U>;
     using real_t = U;
 };
 
@@ -154,9 +148,6 @@ constexpr int N_MAX_PRINT = 3;
 
 template <typename T>
 void print_matrix(const int &n, const std::vector<T> &A) {
-
-    const std::streamsize original_stream_size = std::cout.precision();
-    std::cout << std::setprecision(14);
 
     // Print transpose
     for (int i = 0; i < n; i++) {
@@ -181,7 +172,6 @@ void print_matrix(const int &n, const std::vector<T> &A) {
         std::cout << "\n";
     }
     std::cout << std::flush;
-    std::cout << std::setprecision(original_stream_size);
 }
 
 
