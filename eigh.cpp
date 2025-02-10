@@ -377,9 +377,7 @@ struct Calculator {
 #endif
     }
 
-    /* Solve eigensystem. Eigenvectors will be optionally copied to h_V if not null.
-    Note that with complex Hermitian matrices the eigenvectors will be real provided that the algorithm converged,
-    but we store them as complex valued because that is easier. */
+    // Solve eigensystem. Eigenvectors will be optionally copied to h_V if not null.
     void calculate(
         const d_full_type* d_A_input,
         d_real_type* d_W,
@@ -450,8 +448,7 @@ void run(int n, int repeat) {
 
     const int lda = n;
 
-    /* Host eigenvectors. These _should_ be real, but if using complex numbers
-    the HEEVD solver "outputs" them as complex. So use complex type */
+    // Host eigenvectors, can be complex. Optionally copied from the device after finding solution
     std::vector<T> h_V(lda * n, 0);
     // Host eigenvalues, real
     std::vector<real_t> h_W(n, 0);
