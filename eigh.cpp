@@ -8,10 +8,21 @@
 #include <stdexcept>
 #include <vector>
 #include <cstring>
+#include <complex>
+#include <type_traits>
+#include <iomanip>
 
 #ifdef MAGMA
   #include "magma_v2.h"
 #endif
+
+// Check if templated parameter is std::complex
+template<typename T>
+struct is_complex_t : public std::false_type {};
+
+template<typename T>
+struct is_complex_t<std::complex<T>> : public std::true_type {};
+//~
 
 
 #if defined(CUDA)
@@ -77,7 +88,7 @@
   template<>
   cudaDataType cusolver_dtype<double> = CUDA_R_64F;
 
-#else
+#elif defined(HIP)
   #define uplo_t           rocblas_fill
   #define UPLO_LOWER       rocblas_fill_lower
   #define UPLO_UPPER       rocblas_fill_upper
@@ -94,6 +105,48 @@
   template<>
   rocblas_status (*rocsolver_syevd<double>)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, double*, const rocblas_int, double*, double*, rocblas_int*) = &rocsolver_dsyevd;
 
+  // Eigensolvers for complex diagonalization (Hermitian matrices, eigenvalues are real)
+
+  template <typename Real_t>
+  using rocblas_complex_t = typename std::conditional<
+    std::is_same<Real_t, float>::value,
+    rocblas_float_complex,
+    rocblas_double_complex>::type;
+
+  template <typename Real_t>
+  rocblas_status (*rocsolver_heevd)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, rocblas_complex_t<Real_t>*, const rocblas_int, Real_t*, Real_t*, rocblas_int*);
+
+  // rocblas_float_complex
+  template<>
+  rocblas_status (*rocsolver_heevd<float>)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, rocblas_complex_t<float>*, const rocblas_int, float*, float*, rocblas_int*) = &rocsolver_cheevd;
+
+  // rocblas_double_complex
+  template<>
+  rocblas_status (*rocsolver_heevd<double>)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, rocblas_complex_t<double>*, const rocblas_int, double*, double*, rocblas_int*) = &rocsolver_zheevd;
+
+// Helper type for sharing template code between complex and real calculations
+template<typename T>
+struct d_internal_type
+{
+    using full_t = T;
+    using real_t = T;
+};
+
+template<typename U>
+struct d_internal_type<std::complex<U>>
+{
+    using full_t = rocblas_complex_t<U>;
+    using real_t = U;
+};
+
+
+// define rocsolver_eig() to call rocsolver_syevd() for real template arg, and rocsolver_heevd for complex arg
+template<typename T>
+rocblas_status (*rocsolver_eig)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, typename d_internal_type<T>::full_t*, const rocblas_int, typename d_internal_type<T>::real_t*, typename d_internal_type<T>::real_t*, rocblas_int*) = rocsolver_syevd<typename d_internal_type<T>::real_t>;
+
+template<typename U>
+rocblas_status (*rocsolver_eig<std::complex<U>>)(rocblas_handle, const rocblas_evect, const rocblas_fill, const rocblas_int, typename d_internal_type<std::complex<U>>::full_t*, const rocblas_int, typename d_internal_type<std::complex<U>>::real_t*, typename d_internal_type<std::complex<U>>::real_t*, rocblas_int*) = rocsolver_heevd<U>;
+
 #endif
 
 
@@ -101,6 +154,10 @@ constexpr int N_MAX_PRINT = 3;
 
 template <typename T>
 void print_matrix(const int &n, const std::vector<T> &A) {
+
+    const std::streamsize original_stream_size = std::cout.precision();
+    std::cout << std::setprecision(14);
+
     // Print transpose
     for (int i = 0; i < n; i++) {
         if (N_MAX_PRINT < i && i < n - N_MAX_PRINT - 1) {
@@ -119,13 +176,88 @@ void print_matrix(const int &n, const std::vector<T> &A) {
                 }
                 continue;
             }
-            std::printf(" %14.6e", A[j * n + i]);
+            std::cout << A[j * n + i];
         }
         std::cout << "\n";
     }
     std::cout << std::flush;
+    std::cout << std::setprecision(original_stream_size);
 }
 
+
+template<typename T>
+std::vector<T> build_hermitian_matrix(uint32_t seed, uint32_t matrix_size)
+{
+    static_assert(is_complex_t<T>::value, "build_hermitian_matrix<T>() needs std::complex -valued T");
+
+    using real_t = typename T::value_type;
+
+    std::mt19937 gen(seed);
+    std::uniform_real_distribution<real_t> dis(0.0, 1.0);
+    const uint32_t n = matrix_size;
+
+    std::vector<T> out(n* n, 0);
+
+    for (int i = 0; i < n; i++) {
+        // Set off-diagonals to a value < 1
+        for (int j = 0; j < n; j++) {
+
+            const real_t re = dis(gen);
+
+            if (i == j) {
+                // Diagonal is real
+                out[i * n + j] = T(2.0 * re, 0);
+            }
+            else {
+                const real_t im = dis(gen);
+                out[i * n + j] = T(re, im);
+                out[j * n + i] = T(re, -im);
+            }
+        }
+    }
+
+    return out;
+}
+
+// Returns a random symmetric matrix
+template<typename T>
+std::vector<T> build_test_matrix(uint32_t seed, uint32_t matrix_size)
+{
+    std::mt19937 gen(seed);
+    std::uniform_real_distribution<T> dis(0.0, 1.0);
+    const uint32_t n = matrix_size;
+
+    std::vector<T> out(n* n, 0);
+
+    for (int i = 0; i < n; i++) {
+        // Set off-diagonals to a value < 1
+        for (int j = 0; j < n; j++) {
+            T val = dis(gen);
+            out[i * n + j] = val;
+            out[j * n + i] = val;
+        }
+        // Set diagonal
+        out[i * n + i] += i + 1;
+    }
+
+    return out;
+}
+
+
+// Specializations for complex numbers, these return a random Hermitian matrix
+// NB: did not figure out how to avoid unambiguous templates if using partial specializations like std::complex<U> 
+
+template<>
+std::vector<std::complex<float>> build_test_matrix(uint32_t seed, uint32_t matrix_size)
+{    
+    return build_hermitian_matrix<std::complex<float>>(seed, matrix_size);
+}
+
+template<>
+std::vector<std::complex<double>> build_test_matrix(uint32_t seed, uint32_t matrix_size)
+{    
+    return build_hermitian_matrix<std::complex<double>>(seed, matrix_size);
+}
 
 template<typename T>
 struct Calculator {
@@ -135,6 +267,10 @@ struct Calculator {
     int lda;
     uplo_t uplo;
     vec_mode_t vec;
+
+    using d_full_type = typename d_internal_type<T>::full_t;
+    using d_real_type = typename d_internal_type<T>::real_t;
+
 
 #if defined(MAGMA)
     magma_queue_t queue;
@@ -155,7 +291,7 @@ struct Calculator {
 #else
     rocblas_handle handle;
     int *d_info;
-    T *d_work;
+    d_real_type *d_work;
 
 #endif
 
@@ -240,11 +376,16 @@ struct Calculator {
 #endif
     }
 
-    void calculate(const T* d_A_input, T* d_W, T* h_W, T* h_V = nullptr) {
+    void calculate(
+        const d_full_type* d_A_input,
+        d_real_type* d_W,
+        d_real_type* h_W,
+        d_real_type* h_V = nullptr) {
+
         // The input array gets overwritten so we work on a copy
-        T *d_A;
-        cudaMalloc(reinterpret_cast<void **>(&d_A), sizeof(T) * lda*n);
-        cudaMemcpyAsync(d_A, d_A_input, sizeof(T) * lda*n, cudaMemcpyDeviceToDevice, stream);
+        d_full_type *d_A;
+        cudaMalloc(reinterpret_cast<void **>(&d_A), sizeof(d_full_type) * lda*n);
+        cudaMemcpyAsync(d_A, d_A_input, sizeof(d_full_type) * lda*n, cudaMemcpyDeviceToDevice, stream);
 
 #if defined(MAGMA)
         magma_syevd_gpu<T>(vec, uplo, n, d_A, lda, h_W, h_wA, lda, h_work, lwork, h_iwork, liwork, &h_info);
@@ -261,7 +402,8 @@ struct Calculator {
         cudaStreamSynchronize(stream);
 
 #elif defined(HIP)
-        rocsolver_syevd<T>(handle, vec, uplo, n, d_A, lda, d_W, d_work, d_info);
+        //rocsolver_syevd<d_real_type>(handle, vec, uplo, n, d_A, lda, d_W, d_work, d_info);
+        rocsolver_eig<T>(handle, vec, uplo, n, d_A, lda, d_W, d_work, d_info);
         cudaMemcpyAsync(&h_info, d_info, sizeof(int), cudaMemcpyDeviceToHost, stream);
         cudaStreamSynchronize(stream);
 
@@ -288,11 +430,14 @@ struct Calculator {
     }
 };
 
-
-
-
 template <typename T>
 void run(int n, int repeat) {
+
+    using Real_t = typename d_internal_type<T>::real_t;
+
+    using d_full_type = typename d_internal_type<T>::full_t;
+    using d_real_type = typename d_internal_type<T>::real_t;
+
     std::cout << "RUN"
               << " n: " << n
               << " repeat: " << repeat
@@ -301,38 +446,30 @@ void run(int n, int repeat) {
 
     const int lda = n;
 
-    std::vector<T> h_A(lda * n, 0);
-    std::vector<T> h_V(lda * n, 0);
-    std::vector<T> h_W(n, 0);
+    // Host eigenvectors, real
+    std::vector<Real_t> h_V(lda * n, 0);
+    // Host eigenvalues, real
+    std::vector<Real_t> h_W(n, 0);
 
-
-    std::mt19937 gen(n);
-    std::uniform_real_distribution<T> dis(0.0, 1.0);
-    // Build a symmetric matrix
-    for (int i = 0; i < n; i++) {
-        // Set off-diagonals to a value < 1
-        for (int j = 0; j < n; j++) {
-            T val = dis(gen);
-            h_A[i * n + j] = val;
-            h_A[j * n + i] = val;
-        }
-        // Set diagonal
-        h_A[i * n + i] += i + 1;
-    }
+    // Build a test matrix. Will be symmetric for real T and Hermitian for complex T
+    std::vector<T> h_A = build_test_matrix<T>(n, n);
 
     std::cout << "Input matrix" << std::endl;
     print_matrix(n, h_A);
 
-    T *d_A = nullptr;
-    T *d_W = nullptr;
+    // Device matrix (can be complex)
+    d_full_type *d_A = nullptr;
+    // Device eigenvalues (real)
+    d_real_type *d_W = nullptr;
 
     cudaMalloc(reinterpret_cast<void **>(&d_A), sizeof(T) * h_A.size());
-    cudaMalloc(reinterpret_cast<void **>(&d_W), sizeof(T) * h_W.size());
+    cudaMalloc(reinterpret_cast<void **>(&d_W), sizeof(Real_t) * h_W.size());
     cudaMemcpy(d_A, h_A.data(), sizeof(T) * h_A.size(), cudaMemcpyHostToDevice);
     cudaDeviceSynchronize();
 
     uplo_t uplo = UPLO_LOWER;
     vec_mode_t vec = VEC_MODE_YES;
+
     {
         Calculator<T> calc(n, uplo, vec);
 
@@ -365,11 +502,9 @@ void run(int n, int repeat) {
         std::chrono::duration<double, std::milli> time = t1 - t0;
         std::cout << "average time " << time.count()*1e-3 / repeat << " s (including handle creation)" << std::endl;
     }
-
     cudaFree(d_A);
     cudaFree(d_W);
 }
-
 
 enum class NumberType
 {
@@ -429,6 +564,11 @@ int main(int argc, char *argv[]) {
             case NumberType::eDouble:
                 run<double>(n, repeat);
                 break;
+            case NumberType::eComplexFloat:
+                run<std::complex<float>>(n, repeat);
+                break;
+            case NumberType::eComplexDouble:
+                run<std::complex<double>>(n, repeat);
             default:
                 break;
         }
