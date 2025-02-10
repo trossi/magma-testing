@@ -270,7 +270,7 @@ struct Calculator {
 
     using d_full_type = typename d_internal_type<T>::full_t;
     using d_real_type = typename d_internal_type<T>::real_t;
-
+    using h_real_type = d_real_type;
 
 #if defined(MAGMA)
     magma_queue_t queue;
@@ -344,8 +344,9 @@ struct Calculator {
         rocblas_create_handle(&handle);
         rocblas_set_stream(handle, stream);
 
-        // Allocate work arrays
-        cudaMalloc(reinterpret_cast<void **>(&d_work), sizeof(T) * n);
+        // Allocate work array "E", real valued and length n
+        cudaMalloc(reinterpret_cast<void **>(&d_work), sizeof(d_real_type) * n);
+        // Allocate work info: rocblas_int type
         cudaMalloc(reinterpret_cast<void **>(&d_info), sizeof(int));
 #endif
     }
@@ -376,11 +377,14 @@ struct Calculator {
 #endif
     }
 
+    /* Solve eigensystem. Eigenvectors will be optionally copied to h_V if not null.
+    Note that with complex Hermitian matrices the eigenvectors will be real provided that the algorithm converged,
+    but we store them as complex valued because that is easier. */
     void calculate(
         const d_full_type* d_A_input,
         d_real_type* d_W,
-        d_real_type* h_W,
-        d_real_type* h_V = nullptr) {
+        h_real_type* h_W,
+        T* h_V = nullptr) {
 
         // The input array gets overwritten so we work on a copy
         d_full_type *d_A;
@@ -402,7 +406,6 @@ struct Calculator {
         cudaStreamSynchronize(stream);
 
 #elif defined(HIP)
-        //rocsolver_syevd<d_real_type>(handle, vec, uplo, n, d_A, lda, d_W, d_work, d_info);
         rocsolver_eig<T>(handle, vec, uplo, n, d_A, lda, d_W, d_work, d_info);
         cudaMemcpyAsync(&h_info, d_info, sizeof(int), cudaMemcpyDeviceToHost, stream);
         cudaStreamSynchronize(stream);
@@ -423,6 +426,7 @@ struct Calculator {
         }
 #endif
         if (h_V) {
+            // Eigenvectors are now in d_A
             cudaMemcpyAsync(h_V, d_A, sizeof(T) * lda*n, cudaMemcpyDeviceToHost, stream);
             cudaStreamSynchronize(stream);
         }
@@ -446,8 +450,9 @@ void run(int n, int repeat) {
 
     const int lda = n;
 
-    // Host eigenvectors, real
-    std::vector<real_t> h_V(lda * n, 0);
+    /* Host eigenvectors. These _should_ be real, but if using complex numbers
+    the HEEVD solver "outputs" them as complex. So use complex type */
+    std::vector<T> h_V(lda * n, 0);
     // Host eigenvalues, real
     std::vector<real_t> h_W(n, 0);
 
@@ -463,7 +468,7 @@ void run(int n, int repeat) {
     d_real_type *d_W = nullptr;
 
     cudaMalloc(reinterpret_cast<void **>(&d_A), sizeof(T) * h_A.size());
-    cudaMalloc(reinterpret_cast<void **>(&d_W), sizeof(real_t) * h_W.size());
+    cudaMalloc(reinterpret_cast<void **>(&d_W), sizeof(d_real_type) * h_W.size());
     cudaMemcpy(d_A, h_A.data(), sizeof(T) * h_A.size(), cudaMemcpyHostToDevice);
     cudaDeviceSynchronize();
 
@@ -482,6 +487,7 @@ void run(int n, int repeat) {
         // Run timing
         auto t0 = std::chrono::high_resolution_clock::now();
         for (int iter = 0; iter < repeat; iter++) {
+            // Solve eigensystem, eigenvecs are also solved but not copied to host
             calc.calculate(d_A, d_W, h_W.data());
         }
         auto t1 = std::chrono::high_resolution_clock::now();
@@ -569,6 +575,7 @@ int main(int argc, char *argv[]) {
                 break;
             case NumberType::eComplexDouble:
                 run<std::complex<double>>(n, repeat);
+                break;
             default:
                 break;
         }
