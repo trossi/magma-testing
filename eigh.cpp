@@ -173,7 +173,7 @@ void print_matrix(const int &n, const std::vector<T> &A) {
                 }
                 continue;
             }
-            std::cout << A[j * n + i];
+            std::cout << A[j * n + i] << " ";
         }
         std::cout << "\n";
     }
@@ -597,7 +597,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Calculate
-    for (auto n: matrix_sizes) {
+    for (int n: matrix_sizes) {
         
         switch (number_type) {
             case NumberType::eFloat:
