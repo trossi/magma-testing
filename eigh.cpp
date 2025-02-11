@@ -29,6 +29,7 @@ struct is_complex_t<std::complex<T>> : public std::true_type {};
 #if defined(CUDA)
   #include <cuda_runtime.h>
   #include <cusolverDn.h>
+  #include <cuComplex.h>
 #elif defined(HIP)
   #include <hip/hip_runtime.h>
   #include "rocblas/rocblas.h"
@@ -103,6 +104,13 @@ struct is_complex_t<std::complex<T>> : public std::true_type {};
   template<>
   cudaDataType cusolver_dtype<double> = CUDA_R_64F;
 
+  template<>
+  cudaDataType cusolver_dtype<std::complex<float>> = CUDA_C_32F;
+
+  template<>
+  cudaDataType cusolver_dtype<std::complex<double>> = CUDA_C_64F;
+
+
 #elif defined(HIP)
   #define uplo_t           rocblas_fill
   #define UPLO_LOWER       rocblas_fill_lower
@@ -143,7 +151,7 @@ struct backend_complex
 #if defined(MAGMA)
     using type = magma_complex_num<T>;
 #elif defined(CUDA)
-    //TODO
+    using type = typename std::conditional<std::is_same<float, T>::value, cuFloatComplex, cuDoubleComplex>::type;
 #elif defined(HIP)
     using type = rocblas_complex_num<T>;
 #endif
@@ -255,7 +263,7 @@ std::vector<std::complex<double>> build_test_matrix(uint32_t seed, uint32_t matr
 }
 
 // T is real valued (float/double), use the bool argument to choose between real vs complex calculation
-template<typename T, bool bIsComplex>
+template<typename T, bool bComplex>
 struct Calculator {
     cudaStream_t stream;
     int h_info;
@@ -264,14 +272,14 @@ struct Calculator {
     uplo_t uplo;
     vec_mode_t vec;
 
-    static_assert(!is_complex_t<T>(), "Calculator<T, bIsComplex> needs real-valued T");
+    static_assert(!is_complex_t<T>(), "Calculator<T, bComplex> needs real-valued T");
 
     using h_complex = typename std::complex<T>;
     using d_complex = typename backend_complex<T>::type;
 
 #if defined(MAGMA)
     magma_queue_t queue;
-    // magma work arrays need to be magma complex type
+    // magma work arrays need to be magma complex type, but note that these are actually alloc'd on the host...
     d_complex *h_wA;
     d_complex *h_work;
     magma_int_t lwork;
@@ -297,6 +305,9 @@ struct Calculator {
     }
 
 #elif defined(CUDA)
+    const cudaDataType cusolver_dtype_real = cusolver_dtype<T>;
+    const cudaDataType cusolver_dtype_complex = cusolver_dtype<std::complex<T>>; 
+
     cusolverDnHandle_t handle;
     cusolverDnParams_t params;
     int *d_info;
@@ -336,10 +347,10 @@ struct Calculator {
         cusolverDnSetStream(handle, stream);
         cusolverDnCreateParams(&params);
 
-        // Query work sizes
+        // Query work sizes. The DataTypeW must always be real
         cusolverDnXsyevd_bufferSize(
-            handle, params, vec, uplo, n, cusolver_dtype<T>, nullptr, lda,
-            cusolver_dtype<T>, nullptr, cusolver_dtype<T>, &d_work_size,
+            handle, params, vec, uplo, n, cusolver_dtype_complex, nullptr, lda,
+            cusolver_dtype_real, nullptr, cusolver_dtype_complex, &d_work_size,
             &h_work_size);
 
         // Allocate work arrays
@@ -410,8 +421,8 @@ struct Calculator {
 
 #elif defined(CUDA)
         cusolverDnXsyevd(
-            handle, params, vec, uplo, n, cusolver_dtype<T>, d_A, lda,
-            cusolver_dtype<T>, d_W, cusolver_dtype<T>, d_work, d_work_size,
+            handle, params, vec, uplo, n, cusolver_dtype_complex, d_A, lda,
+            cusolver_dtype_real, d_W, cusolver_dtype_complex, d_work, d_work_size,
             h_work, h_work_size, d_info);
         cudaMemcpyAsync(&h_info, d_info, sizeof(int), cudaMemcpyDeviceToHost, stream);
         cudaStreamSynchronize(stream);
@@ -431,14 +442,15 @@ struct Calculator {
 
         // Copy to host
 #if !defined(MAGMA)
+        // Eigenvalues
         if (h_W) {
             cudaMemcpyAsync(h_W, d_W, sizeof(T) * n, cudaMemcpyDeviceToHost, stream);
             cudaStreamSynchronize(stream);
         }
 #endif
+        // Eigenvectors are now in d_A
         if (h_V) {
-            // Eigenvectors are now in d_A
-            cudaMemcpyAsync(h_V, d_A, sizeof(T) * lda*n, cudaMemcpyDeviceToHost, stream);
+            cudaMemcpyAsync(h_V, d_A, sizeof(d_complex) * lda*n, cudaMemcpyDeviceToHost, stream);
             cudaStreamSynchronize(stream);
         }
         cudaFree(d_A);
@@ -465,7 +477,7 @@ struct maybe_complex<std::complex<U>>
 #if defined(MAGMA)
     using complex = magma_complex_num<U>;
 #elif defined(CUDA)
-    //TODO
+    using complex = typename backend_complex<U>::type;
 #elif defined(HIP)
     using complex = rocblas_complex_num<U>;
 #endif
