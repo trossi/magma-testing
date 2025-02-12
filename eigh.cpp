@@ -11,7 +11,6 @@
 #include <complex>
 #include <type_traits>
 #include <iomanip>
-#include <concepts>
 #include <cassert>
 
 #ifdef MAGMA
@@ -48,6 +47,7 @@
   #error "Define CUDA or HIP"
 #endif
 
+template<bool flag = false> void static_no_match() { static_assert(flag, "No match"); }
 
 // Check if templated parameter is std::complex
 template<typename T>
@@ -56,46 +56,46 @@ struct is_complex_t : public std::false_type {};
 template<typename T>
 struct is_complex_t<std::complex<T>> : public std::true_type {};
 
-template <typename T>
-concept Complex = is_complex_t<T>::value;
+template<typename T>
+using enable_if_complex = std::enable_if_t<is_complex_t<T>::value, void>;
 
 template<typename T>
-concept Real = not is_complex_t<T>();
+using enable_if_real = std::enable_if_t<!is_complex_t<T>::value, void>;
 //~
 
 // Helper type for sharing template code between complex and real calculations
-template<typename T>
+template<typename T, typename Enable = void>
 struct maybe_complex;
 
-template<Complex T>
-struct maybe_complex<T> {
+template<typename T>
+struct maybe_complex<T, enable_if_complex<T>> {
     using full_t = T;
-    using real_t = T::value_type;
+    using real_t = typename T::value_type;
 };
 
-template<Real T>
-struct maybe_complex<T> {
+template<typename T>
+struct maybe_complex<T, enable_if_real<T>> {
     using full_t = T;
     using real_t = T;
 };
 
-template <typename T>
+template <typename T, typename Enable = void>
 struct solver_backend_types;
 
-template <Real T>
-struct solver_backend_types<T> {
+template <typename T>
+struct solver_backend_types<T, enable_if_real<T>> {
     using dtype_eigval = T;
     using dtype_matrix = T;    
 };
 
-template <Complex T>
-struct solver_backend_types<T> {
+template <typename T>
+struct solver_backend_types<T, enable_if_complex<T>> {
     using dtype_eigval = typename T::value_type;
     
 #if defined(MAGMA)
-    using dtype_matrix = std::conditional<std::is_same<dtype_eigval, float>::value, magmaFloatComplex, magmaDoubleComplex>::type;
+    using dtype_matrix = typename std::conditional<std::is_same<dtype_eigval, float>::value, magmaFloatComplex, magmaDoubleComplex>::type;
 #elif defined(CUDA)
-    using dtype_matrix = std::conditional<std::is_same<dtype_eigval, float>::value, cuFloatComplex, cuDoubleComplex>::type;
+    using dtype_matrix = typename std::conditional<std::is_same<dtype_eigval, float>::value, cuFloatComplex, cuDoubleComplex>::type;
 #elif defined(HIP)
     using dtype_matrix = rocblas_complex_num<dtype_eigval>;
 #endif
@@ -116,14 +116,29 @@ struct solver_backend_types<T> {
       using matrix_dtype = typename solver_backend_types<T>::dtype_matrix;
       using real_t = typename solver_backend_types<T>::dtype_eigval;
 
-      static auto real_part(matrix_dtype magma_number) requires (Complex<T>) {
+/*
+      static auto real_part(matrix_dtype magma_number)
+        -> enable_if_complex<T, decltype(::real(magma_number))> {
             // ::real() for magma c-variables defined in magma_operators.h
             return ::real(magma_number);
       }
 
-      static auto real_part(matrix_dtype magma_number) requires (Real<T>) {
+      static auto real_part(matrix_dtype magma_number)
+        -> enable_if_real<T, matrix_dtype> {
           return magma_number;
       }
+      */
+
+    static real_t real_part(matrix_dtype magma_number) {
+        
+        if constexpr (is_complex_t<T>::value)
+        {        
+            // ::real() for magma c-variables defined in magma_operators.h
+            return ::real(magma_number);
+        } else {
+            return magma_number;
+        }
+    }
 
       // Common eigensolver. For real types the rwork and lrwork inputs are ignored
       static magma_int_t magma_eigsolver_gpu(magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, matrix_dtype *dA,
@@ -143,7 +158,7 @@ struct solver_backend_types<T> {
                 return magma_dsyevd_gpu(jobz, uplo, n, dA, ldda, w, wA, ldwa, work, lwork, iwork, liwork, info);
             }
             else {
-                static_assert(false, "magma_eigsolver_gpu not implemented for your template param");
+                static_no_match();
             }
         }
   };
@@ -211,7 +226,7 @@ struct solver_backend_types<T> {
                 return rocsolver_dsyevd(handle, evect, uplo, n, dA, lda, D, E, info);
             }
             else {
-                static_assert(false, "roc_common_eigsolver not implemented for your template param");
+                static_no_match();
             }
         }
   };
@@ -364,8 +379,8 @@ struct Calculator {
     }
 
 #elif defined(CUDA)
-    const cudaDataType cusolver_dtype_real = cusolver_dtype<T>;
-    const cudaDataType cusolver_dtype_complex = cusolver_dtype<std::complex<T>>; 
+    const cudaDataType cusolver_dtype_real = cusolver_dtype<eigval_t>;
+    const cudaDataType cusolver_dtype_complex = cusolver_dtype<T>; 
 
     cusolverDnHandle_t handle;
     cusolverDnParams_t params;
@@ -399,7 +414,7 @@ struct Calculator {
         h_work = reinterpret_cast<backend_dtype*>(malloc(sizeof(backend_dtype) * lwork));
         h_iwork = reinterpret_cast<magma_int_t*>(malloc(sizeof(magma_int_t) * liwork));
 
-        if constexpr (Complex<T>) {
+        if constexpr (is_complex_t<T>::value) {
             assert(lrwork > 0 && "Invalid lrwork (complex solver)");
             rwork.resize(lrwork);
         }
@@ -523,10 +538,10 @@ struct Calculator {
 template <typename T>
 void run(int n, int repeat) {
 
-    using eigval_t = Calculator<T>::eigval_t;
+    using eigval_t = typename Calculator<T>::eigval_t;
 
-    using backend_dtype = Calculator<T>::backend_dtype;
-    using backend_eigval_t = Calculator<T>::backend_eigval_t;
+    using backend_dtype = typename Calculator<T>::backend_dtype;
+    using backend_eigval_t = typename Calculator<T>::backend_eigval_t;
 
 
     std::cout << "RUN"
