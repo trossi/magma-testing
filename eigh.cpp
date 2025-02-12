@@ -12,6 +12,7 @@
 #include <type_traits>
 #include <iomanip>
 #include <concepts>
+#include <cassert>
 
 #ifdef MAGMA
   #include "magma_v2.h"
@@ -72,7 +73,6 @@ struct maybe_complex<T> {
     using real_t = T::value_type;
 };
 
-
 template<Real T>
 struct maybe_complex<T> {
     using full_t = T;
@@ -115,6 +115,15 @@ struct solver_backend_types<T> {
 
       using matrix_dtype = typename solver_backend_types<T>::dtype_matrix;
       using real_t = typename solver_backend_types<T>::dtype_eigval;
+
+      static auto real_part(matrix_dtype magma_number) requires (Complex<T>) {
+            // ::real() for magma c-variables defined in magma_operators.h
+            return ::real(magma_number);
+      }
+
+      static auto real_part(matrix_dtype magma_number) requires (Real<T>) {
+          return magma_number;
+      }
 
       // Common eigensolver. For real types the rwork and lrwork inputs are ignored
       static magma_int_t magma_eigsolver_gpu(magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, matrix_dtype *dA,
@@ -202,7 +211,7 @@ struct solver_backend_types<T> {
                 return rocsolver_dsyevd(handle, evect, uplo, n, dA, lda, D, E, info);
             }
             else {
-                static_assert(false, "magma_eigsolver_gpu not implemented for your template param");
+                static_assert(false, "roc_common_eigsolver not implemented for your template param");
             }
         }
   };
@@ -339,7 +348,7 @@ struct Calculator {
 
     // rwork and lrwork needed for complex MAGMA solver, not used by the real version
     std::vector<backend_eigval_t> rwork;
-    magma_int_t lrwork;
+    magma_int_t lrwork = 0;
 
     // Find optimal workgroup sizes
     void magma_query_work_sizes(magma_int_t &lwork_opt, magma_int_t &lrwork_opt, magma_int_t &liwork_opt) {
@@ -349,7 +358,7 @@ struct Calculator {
         
         MagmaHelpers<T>::magma_eigsolver_gpu(vec, uplo, n, nullptr, lda, nullptr, nullptr, lda, &work_temp, -1, &rwork_temp, -1, &iwork_temp, -1, &h_info);
 
-        lwork_opt = static_cast<magma_int_t>(real(work_temp));
+        lwork_opt = static_cast<magma_int_t>(MagmaHelpers<T>::real_part(work_temp));
         lrwork_opt = static_cast<magma_int_t>(rwork_temp);
         liwork_opt = iwork_temp;
     }
@@ -389,6 +398,11 @@ struct Calculator {
         h_wA = reinterpret_cast<backend_dtype*>(malloc(sizeof(backend_dtype) * lda*n));
         h_work = reinterpret_cast<backend_dtype*>(malloc(sizeof(backend_dtype) * lwork));
         h_iwork = reinterpret_cast<magma_int_t*>(malloc(sizeof(magma_int_t) * liwork));
+
+        if constexpr (Complex<T>) {
+            assert(lrwork > 0 && "Invalid lrwork (complex solver)");
+            rwork.resize(lrwork);
+        }
 
 #elif defined(CUDA)
         // Initialize
@@ -463,7 +477,6 @@ struct Calculator {
 
 #if defined(MAGMA)
 
-        rwork.resize(lrwork);
         MagmaHelpers<T>::magma_eigsolver_gpu(vec, uplo, n, d_A, lda, h_W, h_wA, lda, h_work, lwork, rwork.data(), lrwork, h_iwork, liwork, &h_info);
 
         // Copy eigenvectors to GPU
