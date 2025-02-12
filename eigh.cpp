@@ -63,7 +63,7 @@ template<typename T>
 using enable_if_real = std::enable_if_t<!is_complex_t<T>::value, void>;
 //~
 
-// Helper type for sharing template code between complex and real calculations
+// Helper types for sharing template code between complex and real calculations
 template<typename T, typename Enable = void>
 struct maybe_complex;
 
@@ -100,7 +100,7 @@ struct solver_backend_types<T, enable_if_complex<T>> {
     using dtype_matrix = rocblas_complex_num<dtype_eigval>;
 #endif
 };
-
+//~
 
 #if defined(MAGMA)
   #define uplo_t           magma_uplo_t
@@ -116,29 +116,15 @@ struct solver_backend_types<T, enable_if_complex<T>> {
       using matrix_dtype = typename solver_backend_types<T>::dtype_matrix;
       using real_t = typename solver_backend_types<T>::dtype_eigval;
 
-/*
-      static auto real_part(matrix_dtype magma_number)
-        -> enable_if_complex<T, decltype(::real(magma_number))> {
-            // ::real() for magma c-variables defined in magma_operators.h
-            return ::real(magma_number);
-      }
+      static real_t real_part(matrix_dtype magma_number) {
 
-      static auto real_part(matrix_dtype magma_number)
-        -> enable_if_real<T, matrix_dtype> {
-          return magma_number;
+          if constexpr (is_complex_t<T>::value) {        
+              // ::real() for magma c-variables defined in magma_operators.h
+              return ::real(magma_number);
+          } else {
+              return magma_number;
+          }
       }
-      */
-
-    static real_t real_part(matrix_dtype magma_number) {
-        
-        if constexpr (is_complex_t<T>::value)
-        {        
-            // ::real() for magma c-variables defined in magma_operators.h
-            return ::real(magma_number);
-        } else {
-            return magma_number;
-        }
-    }
 
       // Common eigensolver. For real types the rwork and lrwork inputs are ignored
       static magma_int_t magma_eigsolver_gpu(magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, matrix_dtype *dA,
@@ -232,6 +218,8 @@ struct solver_backend_types<T, enable_if_complex<T>> {
   };
 
 #endif // ~HIP
+
+// Stuff for test matrices
 
 constexpr int N_MAX_PRINT = 3;
 
@@ -334,6 +322,7 @@ template<>
 std::vector<std::complex<double>> build_test_matrix(uint32_t seed, uint32_t matrix_size) {    
     return build_hermitian_matrix<std::complex<double>>(seed, matrix_size);
 }
+//~
 
 
 template<typename T>
@@ -627,6 +616,17 @@ int main(int argc, char *argv[]) {
     int repeat = 10;
     NumberType number_type = NumberType::eDouble;
 
+    if (argc <= 1)
+    {
+        std::cout << "Usage: <executable> <matrix_size> <repeat> <number_type>\n\n";
+        std::cout << "Example: ./exec 3,100,800,3200 10 double\n";
+        std::cout << "This will solve and time the eigenvalue problem for double-valued,"
+            << " symmetric (Hermitian if using complex numbers) matrices of sizes 3,100,800,3200, each repeated 10 times.\n";
+        std::cout << "Choose number_type from: 'float', 'double', 'complex_float', 'complex_double'.\n";
+        std::cout << std::flush;
+        return EXIT_SUCCESS;
+    }
+
     // Parse args
     if (argc > 1) {
         matrix_sizes.clear();
@@ -658,8 +658,8 @@ int main(int argc, char *argv[]) {
             std::printf("Invalid number type: [%s]. Choose from: float, double, complex_float, complex_double",
                 in_number_type_str.c_str());
         }
-
     }
+    
 
     // Calculate
     for (int n: matrix_sizes) {
