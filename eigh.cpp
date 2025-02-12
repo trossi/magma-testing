@@ -523,10 +523,10 @@ struct Calculator {
 template <typename T>
 void run(int n, int repeat) {
 
-    using eigval_t = typename maybe_complex<T>::real_t;
+    using eigval_t = Calculator<T>::eigval_t;
 
-    using backend_dtype = typename solver_backend_types<T>::dtype_matrix;
-    using backend_eigval_t = typename solver_backend_types<T>::dtype_eigval;
+    using backend_dtype = Calculator<T>::backend_dtype;
+    using backend_eigval_t = Calculator<T>::backend_eigval_t;
 
 
     std::cout << "RUN"
