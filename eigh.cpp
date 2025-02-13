@@ -577,7 +577,7 @@ struct TestResults {
 };
 
 template <typename T>
-TestResults run(int n, int repeat) {
+TestResults run(int n, int repeat, bool rerun_with_inits = true) {
 
     using eigval_t = typename Calculator<T>::eigval_t;
 
@@ -645,6 +645,7 @@ TestResults run(int n, int repeat) {
         std::cout << "average time " << results.avg_time << " s" << std::endl;
     }
 
+    if (rerun_with_inits)
     {
         // Run timing recreating handles etc every time
         auto t0 = std::chrono::high_resolution_clock::now();
@@ -683,10 +684,11 @@ std::map<std::string, NumberType> number_type_names {
 };
 
 void print_usage() {
-    std::cout << "Usage: <executable> <matrix_size> <repeat> <number_type>\n\n";
-    std::cout << "Example: ./exec 3,100,800,3200 10 double\n";
+    std::cout << "Usage: <executable> <matrix_size> <repeat> <number_type> <rerun_with_inits>\n\n";
+    std::cout << "Example: ./exec 3,100,800,3200 10 double 1\n";
     std::cout << "This will solve and time the eigenvalue problem for double-valued,"
-        << " symmetric (Hermitian if using complex numbers) matrices of sizes 3,100,800,3200, each repeated 10 times.\n";
+        << " symmetric (Hermitian if using complex numbers) matrices of sizes 3,100,800,3200, each repeated 10 times.\n"
+        << "The last argument (0 or 1) specifies if the test should be repeated with full recreation of handles etc on each iteration.\n";
     std::cout << "Choose number_type from: 'float', 'double', 'complex_float', 'complex_double'.\n";
     std::cout << std::flush;
 }
@@ -696,6 +698,7 @@ int main(int argc, char *argv[]) {
     std::list<int> matrix_sizes = {10};
     int repeat = 10;
     NumberType number_type = NumberType::eDouble;
+    bool rerun_with_inits = true;
 
     if (argc <= 1)
     {
@@ -734,6 +737,9 @@ int main(int argc, char *argv[]) {
         assert(number_type_names.count(in_number_type_str) > 0);
         number_type = number_type_names.at(in_number_type_str);
     }
+    if (argc > 4) {
+        rerun_with_inits = static_cast<bool>(std::stoi(argv[4]));
+    }
 
     std::vector<TestResults> results;
     results.reserve(matrix_sizes.size());
@@ -742,16 +748,16 @@ int main(int argc, char *argv[]) {
         
         switch (number_type) {
             case NumberType::eFloat:
-                results.push_back(run<float>(n, repeat));
+                results.push_back(run<float>(n, repeat, rerun_with_inits));
                 break;
             case NumberType::eDouble:
-                results.push_back(run<double>(n, repeat));
+                results.push_back(run<double>(n, repeat, rerun_with_inits));
                 break;
             case NumberType::eComplexFloat:
-                results.push_back(run<std::complex<float>>(n, repeat));
+                results.push_back(run<std::complex<float>>(n, repeat, rerun_with_inits));
                 break;
             case NumberType::eComplexDouble:
-                results.push_back(run<std::complex<double>>(n, repeat));
+                results.push_back(run<std::complex<double>>(n, repeat, rerun_with_inits));
                 break;
             default:
                 break;
