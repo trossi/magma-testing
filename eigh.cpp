@@ -12,6 +12,7 @@
 #include <type_traits>
 #include <iomanip>
 #include <cassert>
+#include <map>
 
 #ifdef MAGMA
   #include "magma_v2.h"
@@ -219,38 +220,6 @@ struct solver_backend_types<T, enable_if_complex<T>> {
 
 #endif // ~HIP
 
-// Stuff for test matrices
-
-constexpr int N_MAX_PRINT = 3;
-
-template <typename T>
-void print_matrix(const int &n, const std::vector<T> &A) {
-
-    // Print transpose
-    for (int i = 0; i < n; i++) {
-        if (N_MAX_PRINT < i && i < n - N_MAX_PRINT - 1) {
-            if (i == N_MAX_PRINT + 1) {
-                for (int j = 0; j < (N_MAX_PRINT + 1) * 2 + 1; j++) {
-                    std::printf(" %14s", "...");
-                }
-                std::cout << "\n";
-            }
-            continue;
-        }
-        for (int j = 0; j < n; j++) {
-            if (N_MAX_PRINT < j && j < n - N_MAX_PRINT - 1) {
-                if (j == N_MAX_PRINT + 1) {
-                    std::printf(" %14s", "...");
-                }
-                continue;
-            }
-            std::cout << A[j * n + i] << " ";
-        }
-        std::cout << "\n";
-    }
-    std::cout << std::flush;
-}
-
 
 template<typename T>
 std::vector<T> build_hermitian_matrix(uint32_t seed, uint32_t matrix_size) {
@@ -288,7 +257,9 @@ std::vector<T> build_hermitian_matrix(uint32_t seed, uint32_t matrix_size) {
 
 // Returns a random symmetric matrix
 template<typename T>
-std::vector<T> build_test_matrix(uint32_t seed, uint32_t matrix_size) {
+std::vector<T> build_symmetric_matrix(uint32_t seed, uint32_t matrix_size) {
+
+    static_assert(!is_complex_t<T>::value, "build_symmetric_matrix<T>() needs real-valued T");
 
     std::mt19937 gen(seed);
     std::uniform_real_distribution<T> dis(0.0, 1.0);
@@ -310,18 +281,92 @@ std::vector<T> build_test_matrix(uint32_t seed, uint32_t matrix_size) {
     return out;
 }
 
+template<typename T>
+static inline void print_number_formatted(T number) {
+    
+    if constexpr (is_complex_t<T>::value) {
+        std::printf("(%14.6e, %14.6e)", number.real(), number.imag());
+    }
+    else {
+        std::printf("%14.6e", number);
+    }
+};
 
-// Specializations for complex numbers, these return a random Hermitian matrix
+// Stuff for test matrices
+template<typename T>
+struct MatrixHelpers {
+    static void print_matrix(const int &n, const std::vector<T> &A) {
 
-template<>
-std::vector<std::complex<float>> build_test_matrix(uint32_t seed, uint32_t matrix_size) {    
-    return build_hermitian_matrix<std::complex<float>>(seed, matrix_size);
-}
+        constexpr int N_MAX_PRINT = 3;
 
-template<>
-std::vector<std::complex<double>> build_test_matrix(uint32_t seed, uint32_t matrix_size) {    
-    return build_hermitian_matrix<std::complex<double>>(seed, matrix_size);
-}
+        // Print transpose
+        for (int i = 0; i < n; i++) {
+            if (N_MAX_PRINT < i && i < n - N_MAX_PRINT - 1) {
+                if (i == N_MAX_PRINT + 1) {
+                    for (int j = 0; j < (N_MAX_PRINT + 1) * 2 + 1; j++) {
+                        std::printf(" %14s", "...");
+                    }
+                    std::cout << "\n";
+                }
+                continue;
+            }
+            for (int j = 0; j < n; j++) {
+                if (N_MAX_PRINT < j && j < n - N_MAX_PRINT - 1) {
+                    if (j == N_MAX_PRINT + 1) {
+                        std::printf(" %14s", "...");
+                    }
+                    continue;
+                }
+                print_number_formatted(A[j * n + i]);
+                std::cout << " ";
+            }
+            std::cout << "\n";
+        }
+        std::cout << std::flush;
+    }
+
+    // Returns a random Hermitian matrix for complex T, and a symmetric matrix for real T 
+    static std::vector<T> build_test_matrix(uint32_t seed, uint32_t matrix_size) {
+
+        if constexpr (is_complex_t<T>::value) {
+            return build_hermitian_matrix<T>(seed, matrix_size);
+        }
+        else {
+            return build_symmetric_matrix<T>(seed, matrix_size);
+        }
+    }
+
+
+    // Rotates eigenvectors so that the first element in the first vector is positive and real
+    static void fix_eigenvector_phase(std::vector<T>& inOut_eigenvector_matrix) {
+
+        if (inOut_eigenvector_matrix.empty()) {
+            return;
+        }
+
+        if constexpr (is_complex_t<T>::value) {
+            
+            const auto angle = std::arg(inOut_eigenvector_matrix.front());
+            if (angle == 0) return;
+
+            const auto rotated_angle = (angle < 0) ? M_PI - angle : -angle;
+            const auto rotation = T(0, std::exp(rotated_angle));
+
+            for (size_t i = 0; i < inOut_eigenvector_matrix.size(); i++) {
+                inOut_eigenvector_matrix[i] *= rotation;
+            }
+        }
+        else {
+            // For real numbers, just flip the overall sign if the first element is negative
+            if (inOut_eigenvector_matrix.front() < 0) {
+                for (size_t i = 0; i < inOut_eigenvector_matrix.size(); i++) {
+                    inOut_eigenvector_matrix[i] *= -1;
+                }
+            }
+        }
+    }
+
+};
 //~
 
 
@@ -524,8 +569,14 @@ struct Calculator {
     }
 };
 
+struct TestResults {
+    int matrix_size = 0;
+    double avg_time = 0.0;
+    double avg_time_including_init = 0.0;
+};
+
 template <typename T>
-void run(int n, int repeat) {
+TestResults run(int n, int repeat) {
 
     using eigval_t = typename Calculator<T>::eigval_t;
 
@@ -547,10 +598,10 @@ void run(int n, int repeat) {
     std::vector<eigval_t> h_W(n, 0);
 
     // Build a test matrix. Will be symmetric for real T and Hermitian for complex T
-    std::vector<T> h_A = build_test_matrix<T>(n, n);
+    std::vector<T> h_A = MatrixHelpers<T>::build_test_matrix(n, n);
 
     std::cout << "Input matrix" << std::endl;
-    print_matrix(n, h_A);
+    MatrixHelpers<T>::print_matrix(n, h_A);
 
     // Device matrix (can be complex)
     backend_dtype *d_A = nullptr;
@@ -562,6 +613,9 @@ void run(int n, int repeat) {
     cudaMemcpy(d_A, h_A.data(), sizeof(T) * h_A.size(), cudaMemcpyHostToDevice);
     cudaDeviceSynchronize();
 
+    TestResults results;
+    results.matrix_size = n;
+
     uplo_t uplo = UPLO_LOWER;
     vec_mode_t vec = VEC_MODE_YES;
 
@@ -571,8 +625,11 @@ void run(int n, int repeat) {
         // Warm up
         calc.calculate(d_A, d_W, h_W.data(), h_V.data());
 
-        std::cout << "Output matrix" << std::endl;
-        print_matrix(n, h_V);
+        // Rotate eigenvectors to a common phase for easier comparison
+        MatrixHelpers<T>::fix_eigenvector_phase(h_V);
+
+        std::cout << "Output matrix (normalized)" << std::endl;
+        MatrixHelpers<T>::print_matrix(n, h_V);
 
         // Run timing
         auto t0 = std::chrono::high_resolution_clock::now();
@@ -583,7 +640,8 @@ void run(int n, int repeat) {
         auto t1 = std::chrono::high_resolution_clock::now();
 
         std::chrono::duration<double, std::milli> time = t1 - t0;
-        std::cout << "average time " << time.count()*1e-3 / repeat << " s" << std::endl;
+        results.avg_time = time.count()*1e-3 / repeat;
+        std::cout << "average time " << results.avg_time << " s" << std::endl;
     }
 
     {
@@ -596,10 +654,13 @@ void run(int n, int repeat) {
         auto t1 = std::chrono::high_resolution_clock::now();
 
         std::chrono::duration<double, std::milli> time = t1 - t0;
-        std::cout << "average time " << time.count()*1e-3 / repeat << " s (including handle creation)" << std::endl;
+        results.avg_time_including_init = time.count()*1e-3 / repeat;
+        std::cout << "average time " << results.avg_time_including_init << " s (including handle creation)" << std::endl;
     }
     cudaFree(d_A);
     cudaFree(d_W);
+
+    return results;
 }
 
 enum class NumberType
