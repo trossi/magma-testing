@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <cassert>
 #include <map>
+#include <algorithm>
 
 #ifdef MAGMA
   #include "magma_v2.h"
@@ -663,6 +664,9 @@ TestResults run(int n, int repeat) {
     return results;
 }
 
+const std::vector<std::string> allowed_number_types { "float", "double", "complex_float", "complex_double" };
+
+// Convenience enum to avoid awkward if-else string comparisons
 enum class NumberType
 {
     eFloat, // 32bit
@@ -670,6 +674,22 @@ enum class NumberType
     eComplexFloat, // complex<float>
     eComplexDouble // complex<double> 
 };
+
+std::map<std::string, NumberType> number_type_names {
+    {"float", NumberType::eFloat},
+    {"double", NumberType::eDouble},
+    {"complex_float", NumberType::eComplexFloat},
+    {"complex_double", NumberType::eComplexDouble}
+};
+
+void print_usage() {
+    std::cout << "Usage: <executable> <matrix_size> <repeat> <number_type>\n\n";
+    std::cout << "Example: ./exec 3,100,800,3200 10 double\n";
+    std::cout << "This will solve and time the eigenvalue problem for double-valued,"
+        << " symmetric (Hermitian if using complex numbers) matrices of sizes 3,100,800,3200, each repeated 10 times.\n";
+    std::cout << "Choose number_type from: 'float', 'double', 'complex_float', 'complex_double'.\n";
+    std::cout << std::flush;
+}
 
 int main(int argc, char *argv[]) {
     // Default values
@@ -679,12 +699,7 @@ int main(int argc, char *argv[]) {
 
     if (argc <= 1)
     {
-        std::cout << "Usage: <executable> <matrix_size> <repeat> <number_type>\n\n";
-        std::cout << "Example: ./exec 3,100,800,3200 10 double\n";
-        std::cout << "This will solve and time the eigenvalue problem for double-valued,"
-            << " symmetric (Hermitian if using complex numbers) matrices of sizes 3,100,800,3200, each repeated 10 times.\n";
-        std::cout << "Choose number_type from: 'float', 'double', 'complex_float', 'complex_double'.\n";
-        std::cout << std::flush;
+        print_usage();
         return EXIT_SUCCESS;
     }
 
@@ -697,51 +712,59 @@ int main(int argc, char *argv[]) {
             token = strtok(NULL, ",");
         }
     }
+
+    if (matrix_sizes.empty()) {
+        print_usage();
+        return EXIT_SUCCESS;
+    }
+
     if (argc > 2) {
         repeat = std::stoi(argv[2]);
     }
     if (argc > 3) {
         const std::string in_number_type_str = std::string(argv[3]);
 
-        if (in_number_type_str == "float") {
-            number_type = NumberType::eFloat;
-        }
-        else if (in_number_type_str == "double") {
-            number_type = NumberType::eDouble;
-        }
-        else if (in_number_type_str == "complex_float") {
-            number_type = NumberType::eComplexFloat;
-        }
-        else if (in_number_type_str == "complex_double") {
-            number_type = NumberType::eComplexDouble;
-        }
-        else {
+        if ( std::find(allowed_number_types.begin(), allowed_number_types.end(), in_number_type_str) == allowed_number_types.end() ) {
             std::printf("Invalid number type: [%s]. Choose from: float, double, complex_float, complex_double",
-                in_number_type_str.c_str());
+                in_number_type_str.c_str()
+            );
+            return EXIT_FAILURE;
         }
-    }
-    
 
+        assert(number_type_names.count(in_number_type_str) > 0);
+        number_type = number_type_names.at(in_number_type_str);
+    }
+
+    std::vector<TestResults> results;
+    results.reserve(matrix_sizes.size());
     // Calculate
     for (int n: matrix_sizes) {
         
         switch (number_type) {
             case NumberType::eFloat:
-                run<float>(n, repeat);
+                results.push_back(run<float>(n, repeat));
                 break;
             case NumberType::eDouble:
-                run<double>(n, repeat);
+                results.push_back(run<double>(n, repeat));
                 break;
             case NumberType::eComplexFloat:
-                run<std::complex<float>>(n, repeat);
+                results.push_back(run<std::complex<float>>(n, repeat));
                 break;
             case NumberType::eComplexDouble:
-                run<std::complex<double>>(n, repeat);
+                results.push_back(run<std::complex<double>>(n, repeat));
                 break;
             default:
                 break;
         }
     }
+
+    std::cout << "\n";
+    std::cout << "================= SUMMARY =================\n";
+    std::printf("%6s %18s %18s\n", "Size", "Avg Time", "Avg Time w/ init");
+    for (const TestResults& res : results) {
+        std::printf("%6d %18g %18g\n" , res.matrix_size, res.avg_time, res.avg_time_including_init);
+    }
+    std::cout << std::flush;
 
     cudaDeviceReset();
     return EXIT_SUCCESS;
