@@ -1,5 +1,12 @@
 # Notes on testing MAGMA
 
+This is a test program for comparing the performance of common GPU eigensolvers.
+ - Flag `-DCUDA`: uses `cusolver`
+ - Flag `-DHIP`: uses `rocsolver`
+ - Flag `-DMAGMA`: uses the `MAGMA` library. Also needs either `-DCUDA` or `-DHIP`.
+
+Works with symmetric and Hermitian matrices.
+ 
 Needs compiler with C++17 support.
 
 ## LUMI / MI250x (1 GCD)
