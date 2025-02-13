@@ -351,7 +351,7 @@ struct MatrixHelpers {
             if (angle == 0) return;
 
             const auto rotated_angle = (angle < 0) ? M_PI - angle : -angle;
-            const auto rotation = T(0, std::exp(rotated_angle));
+            const auto rotation = std::exp(T(0, rotated_angle));
 
             for (size_t i = 0; i < inOut_eigenvector_matrix.size(); i++) {
                 inOut_eigenvector_matrix[i] *= rotation;
