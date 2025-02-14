@@ -1,3 +1,4 @@
 *.x
 magma/
 .vscode/*
+*.code-workspace
