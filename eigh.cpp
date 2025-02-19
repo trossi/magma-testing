@@ -87,13 +87,13 @@ struct solver_backend_types;
 template <typename T>
 struct solver_backend_types<T, enable_if_real<T>> {
     using dtype_eigval = T;
-    using dtype_matrix = T;    
+    using dtype_matrix = T;
 };
 
 template <typename T>
 struct solver_backend_types<T, enable_if_complex<T>> {
     using dtype_eigval = typename T::value_type;
-    
+
 #if defined(MAGMA)
     using dtype_matrix = typename std::conditional<std::is_same<dtype_eigval, float>::value, magmaFloatComplex, magmaDoubleComplex>::type;
 #elif defined(CUDA)
@@ -120,7 +120,7 @@ struct solver_backend_types<T, enable_if_complex<T>> {
 
       static real_t real_part(matrix_dtype magma_number) {
 
-          if constexpr (is_complex_t<T>::value) {        
+          if constexpr (is_complex_t<T>::value) {
               // ::real() for magma c-variables defined in magma_operators.h
               return ::real(magma_number);
           } else {
@@ -132,7 +132,7 @@ struct solver_backend_types<T, enable_if_complex<T>> {
       static magma_int_t magma_eigsolver_gpu(magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, matrix_dtype *dA,
         magma_int_t ldda, real_t *w, matrix_dtype *wA, magma_int_t ldwa, matrix_dtype *work, magma_int_t lwork,
         real_t *rwork, magma_int_t lrwork, magma_int_t *iwork, magma_int_t liwork, magma_int_t *info) {
-            
+
             if constexpr (std::is_same<T, std::complex<float>>::value) {
                 return magma_cheevd_gpu(jobz, uplo, n, dA, ldda, w, wA, ldwa, work, lwork, rwork, lrwork, iwork, liwork, info);
             }
@@ -200,7 +200,7 @@ struct solver_backend_types<T, enable_if_complex<T>> {
         real_t* D,
         real_t* E,
         rocblas_int* info) {
-            
+
             if constexpr (std::is_same<T, std::complex<float>>::value) {
                 return rocsolver_cheevd(handle, evect, uplo, n, dA, lda, D, E, info);
             }
@@ -284,7 +284,7 @@ std::vector<T> build_symmetric_matrix(uint32_t seed, uint32_t matrix_size) {
 
 template<typename T>
 static inline void print_number_formatted(T number) {
-    
+
     if constexpr (is_complex_t<T>::value) {
         std::printf("(%14.6e, %14.6e)", number.real(), number.imag());
     }
@@ -326,7 +326,7 @@ struct MatrixHelpers {
         std::cout << std::flush;
     }
 
-    // Returns a random Hermitian matrix for complex T, and a symmetric matrix for real T 
+    // Returns a random Hermitian matrix for complex T, and a symmetric matrix for real T
     static std::vector<T> build_test_matrix(uint32_t seed, uint32_t matrix_size) {
 
         if constexpr (is_complex_t<T>::value) {
@@ -338,33 +338,40 @@ struct MatrixHelpers {
     }
 
 
-    // Rotates eigenvectors so that the first element in the first vector is positive and real
-    static void fix_eigenvector_phase(std::vector<T>& inOut_eigenvector_matrix) {
+    // Rotates eigenvector matrix so that the first element each column is positive and real
+    static void fix_eigenvector_phase(std::vector<T>& inOut_eigenvector_matrix, size_t matrix_size) {
 
-        if (inOut_eigenvector_matrix.empty()) {
+        if (inOut_eigenvector_matrix.empty() || matrix_size < 1) {
             return;
         }
 
-        if constexpr (is_complex_t<T>::value) {
-            
-            const auto angle = std::arg(inOut_eigenvector_matrix.front());
-            if (angle == 0) return;
+        assert(matrix_size*matrix_size == inOut_eigenvector_matrix.size());
 
-            const auto rotated_angle = (angle < 0) ? M_PI - angle : -angle;
-            const auto rotation = std::exp(T(0, rotated_angle));
+        for (size_t i = 0; i < inOut_eigenvector_matrix.size(); i += matrix_size) {
 
-            for (size_t i = 0; i < inOut_eigenvector_matrix.size(); i++) {
-                inOut_eigenvector_matrix[i] *= rotation;
+            if constexpr (is_complex_t<T>::value) {
+
+                const auto angle = std::arg(inOut_eigenvector_matrix[i]);
+                if (angle == 0) continue;
+
+                const auto rotated_angle = (angle < 0) ? M_PI - angle : -angle;
+                const auto rotation = std::exp(T(0, rotated_angle));
+
+                for (size_t j = 0; j < matrix_size; j++) {
+                    inOut_eigenvector_matrix[i + j] *= rotation;
+                }
             }
-        }
-        else {
-            // For real numbers, just flip the overall sign if the first element is negative
-            if (inOut_eigenvector_matrix.front() < 0) {
-                for (size_t i = 0; i < inOut_eigenvector_matrix.size(); i++) {
-                    inOut_eigenvector_matrix[i] *= -1;
+            else {
+                // For real numbers, just flip the overall sign if the first element is negative
+                if (inOut_eigenvector_matrix[i] < 0) {
+                    for (size_t j = 0; j < matrix_size; j++) {
+                        inOut_eigenvector_matrix[i + j] *= -1;
+                    }
                 }
             }
         }
+
+
     }
 
 };
@@ -405,7 +412,7 @@ struct Calculator {
         backend_dtype work_temp;
         backend_eigval_t rwork_temp;
         magma_int_t iwork_temp;
-        
+
         MagmaHelpers<T>::magma_eigsolver_gpu(vec, uplo, n, nullptr, lda, nullptr, nullptr, lda, &work_temp, -1, &rwork_temp, -1, &iwork_temp, -1, &h_info);
 
         lwork_opt = static_cast<magma_int_t>(MagmaHelpers<T>::real_part(work_temp));
@@ -415,7 +422,7 @@ struct Calculator {
 
 #elif defined(CUDA)
     const cudaDataType cusolver_dtype_real = cusolver_dtype<eigval_t>;
-    const cudaDataType cusolver_dtype_complex = cusolver_dtype<T>; 
+    const cudaDataType cusolver_dtype_complex = cusolver_dtype<T>;
 
     cusolverDnHandle_t handle;
     cusolverDnParams_t params;
@@ -627,7 +634,7 @@ TestResults run(int n, int repeat, bool rerun_with_inits = true) {
         calc.calculate(d_A, d_W, h_W.data(), h_V.data());
 
         // Rotate eigenvectors to a common phase for easier comparison
-        MatrixHelpers<T>::fix_eigenvector_phase(h_V);
+        MatrixHelpers<T>::fix_eigenvector_phase(h_V, n);
 
         std::cout << "Output matrix (normalized)" << std::endl;
         MatrixHelpers<T>::print_matrix(n, h_V);
@@ -673,7 +680,7 @@ enum class NumberType
     eFloat, // 32bit
     eDouble, // 64bit
     eComplexFloat, // complex<float>
-    eComplexDouble // complex<double> 
+    eComplexDouble // complex<double>
 };
 
 std::map<std::string, NumberType> number_type_names {
@@ -745,7 +752,7 @@ int main(int argc, char *argv[]) {
     results.reserve(matrix_sizes.size());
     // Calculate
     for (int n: matrix_sizes) {
-        
+
         switch (number_type) {
             case NumberType::eFloat:
                 results.push_back(run<float>(n, repeat, rerun_with_inits));
