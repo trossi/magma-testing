@@ -536,8 +536,8 @@ struct Calculator {
 
         MagmaHelpers<T>::magma_eigsolver_gpu(vec, uplo, n, d_A, lda, h_W, h_wA, lda, h_work, lwork, rwork.data(), lrwork, h_iwork, liwork, &h_info);
 
-        // Copy eigenvectors to GPU
-        cudaMemcpyAsync(d_W, h_W, sizeof(T) * n, cudaMemcpyHostToDevice, stream);
+        // MAGMA outputs eigenvalues to host memory. Copy them to GPU
+        cudaMemcpyAsync(d_W, h_W, sizeof(eigval_t) * n, cudaMemcpyHostToDevice, stream);
 
 #elif defined(CUDA)
         cusolverDnXsyevd(
