@@ -9,6 +9,10 @@ Works with symmetric and Hermitian matrices.
  
 Needs compiler with C++17 support.
 
+## Summary of test results (LUMI/Mahti)
+
+![eigsolvers_cdouble](https://github.com/user-attachments/assets/a272d929-292e-4550-bbf5-abec422b6925)
+
 ## LUMI / MI250x (1 GCD)
 
 ### Installing MAGMA
